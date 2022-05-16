@@ -16,19 +16,22 @@
 
 local capnp_schema = require("capnp_schema")
 
-local proto = Proto("capnp", "Cap'n Proto RPC Protocol")
+local proto = Proto("capnp", "Cap'n Proto Protocol")
 local tcp_port, udp_port
 local dir_marker = {}
 local dir
 local reqs = {}
 
 proto.fields.text = ProtoField.string("capnp.text", "Text")
+proto.prefs.rpc = Pref.bool(
+   "RPC Protocol", true,
+   "Sets wether RPC or raw Cap'n Proto over TCP is dissected.")
 proto.prefs["tcp.port"] = Pref.uint(
-   "TCP Port", 9090,
-   "Set the tcp port for Cap'n Proto RPC messages.")
+   "TCP Port", 6666,
+   "Set the tcp port for Cap'n Proto messages.")
 proto.prefs["udp.port"] = Pref.uint(
-   "UDP Port", 9090,
-   "Set the udp port for Cap'n Proto RPC messages.")
+   "UDP Port", 6666,
+   "Set the udp port for Cap'n Proto messages.")
 proto.prefs.to_port = Pref.string("Direction marker, to port", "->", "")
 proto.prefs.from_port = Pref.string("Direction marker, from port", "<-", "")
 
@@ -115,7 +118,11 @@ function dissect.message(buf, pkt, root)
    end
 
    if not fileNode then
-      fileNode = capnp_schema("id", capnp_schema.rpc.requestedFiles[1].id)
+      if proto.prefs.rpc then
+         fileNode = capnp_schema("id", capnp_schema.rpc.requestedFiles[1].id)
+      else
+         fileNode = capnp_schema("id", capnp_schema.message.nodes[1].id)
+      end
       local messageId = capnp_schema("name", "Message", fileNode.nestedNodes).id
       messageNode = capnp_schema("id", messageId)
    end
@@ -242,11 +249,9 @@ function dissect.struct_fields(b_data, b_ptr, ptrs, psize, discriminant,
          then break end
          if f.group then
             local group = capnp_schema("id", f.group.typeId)
-            local group_discriminantValue, group_discriminantField, group_tree
-               = dissect.struct_discriminant(b_data, group.struct, tree, f.name)
             res[f.name] = dissect.struct_fields(
-               b_data, b_ptr, ptrs, psize, group_discriminantValue,
-               seg, segs, pkt, group_tree, group)
+               b_data, b_ptr, ptrs, psize, discriminant,
+               seg, segs, pkt, tree:add(f.name .. ":", "Group"), group)
          else
             -- make sure to register this call's meta data before
             -- processing the call params
@@ -372,6 +377,19 @@ function dissect.data(data_type, offset, seg, segs, b_data, b_ptr, psize, ptrs,
             seg, ptrs + (offset * 8), segs, pkt,
             tree:add(b_ptr(offset * 8, 8), name),
             val.elementType)
+      end
+   elseif typ == "text" then
+      -- encoded as List(UInt8)
+      local list_pointer = b_ptr(offset * 8, 8):le_uint64()
+      local list_indicator = list_pointer:lower() % 2 ^ 2  -- A (2 bits)
+      local element_size = list_pointer:higher() % 2 ^ 3  -- C (3 bits)
+      if element_size == 2 and list_indicator == 1 then
+         local element_offset = math.floor(list_pointer:lower() / 2 ^ 2) * 8  -- B (30 bits, 2 bits shifted)
+         local element_len = math.floor(list_pointer:higher() / 2 ^ 4) * element_size  -- D (29 bit, 3 bits shifted)
+         local pos_ptr_end = ptrs + ((offset+1) * 8)
+         local element_buf = segs[seg](pos_ptr_end + element_offset, element_len)
+         local value = "\"" .. element_buf:string() .. "\""
+         return value, tree:add(element_buf, name .. ":", value .. " [" .. element_len .. " bytes]")
       end
    elseif typ == "anyPointer" then
       if offset < psize then
@@ -535,6 +553,10 @@ function describe.value(obj)
       end
    elseif typ == "cap" then
       return "cap(" .. tostring(val) .. ")"
+   end
+
+   if type(obj) == "table" then
+      return "(" .. describe.list(obj) .. ")"
    end
 
    return typ .. "=" .. describe.value(val)
