@@ -27,10 +27,10 @@ proto.prefs.rpc = Pref.bool(
    "RPC Protocol", true,
    "Sets wether RPC or raw Cap'n Proto over TCP is dissected.")
 proto.prefs["tcp.port"] = Pref.uint(
-   "TCP Port", 6666,
+   "TCP Port", 9090,
    "Set the tcp port for Cap'n Proto messages.")
 proto.prefs["udp.port"] = Pref.uint(
-   "UDP Port", 6666,
+   "UDP Port", 9090,
    "Set the udp port for Cap'n Proto messages.")
 proto.prefs.to_port = Pref.string("Direction marker, to port", "->", "")
 proto.prefs.from_port = Pref.string("Direction marker, from port", "<-", "")
