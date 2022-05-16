@@ -2,6 +2,7 @@ CAPNP = capnp
 CAT = /bin/cat
 SCHEMA = /usr/local/include/capnp/schema.capnp
 TARGET = $(basename $(notdir $(input)))
+SRC_PATH = $(dir $(input))
 
 define MSG
 The purpose of this Makefile is to generate new schemas for the capnp dissector.
@@ -41,7 +42,7 @@ schema: $(input) plugins/$(TARGET)_capnp.lua
 
 %.lua: Makefile $(input)
 	echo "$$HEAD" > $@
-	$(CAPNP) compile -o$(CAT) $(input) -I/ |\
+	$(CAPNP) compile -o$(CAT) $(input) --src-prefix=$(SRC_PATH) -I$(SRC_PATH) -I/ |\
 	$(CAPNP) decode $(SCHEMA) CodeGeneratorRequest |\
 	sed -e 's/[[(]/{/g' -e 's/[])]/}/g' \
 		-e 's/<opaque pointer>/opaquePointer/g' \
